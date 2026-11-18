@@ -53,6 +53,21 @@ describe("evaluatePolicies", () => {
     expect(evaluatePolicies(p, F).kind).toBe("blocked-by-default");
   });
 
+  it("reports other triggers a policy leaves out", () => {
+    const p = [events("Allow labeler", ["pull_request_target", "workflow_dispatch"])];
+    expect(evaluatePolicies(p, F, ["pull_request_target", "workflow_dispatch", "issue_comment", "schedule"])).toEqual({
+      kind: "allowed",
+      policies: ["Allow labeler"],
+      otherBlocked: ["issue_comment", "schedule"],
+    });
+    expect(evaluatePolicies([events("Push only", ["push"])], F, ["pull_request_target", "push", "schedule"])).toEqual({
+      kind: "blocked-by-policy",
+      policies: ["Push only"],
+      otherBlocked: ["schedule"],
+    });
+    expect(evaluatePolicies([], F, ["pull_request_target", "schedule"])).toEqual({ kind: "blocked-by-default" });
+  });
+
   it("allowed when every applicable event policy allows it", () => {
     const p = [
       events("Allow labeler", ["pull_request_target", "workflow_dispatch"], { conditions: { workflow_path: { include: [F] } } }),

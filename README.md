@@ -93,8 +93,12 @@ A step that runs after a PR checkout but only reads files will still be flagged,
 For broader Actions security checks, use [zizmor](https://docs.zizmor.sh/) or
 [CodeQL for Actions](https://docs.github.com/en/code-security/code-scanning) alongside this tool.
 
-How event policies combine is inferred from GitHub's docs: every active event policy that targets
-the file must allow `pull_request_target`, and if none target it, the default block applies.
+The generated policy command was tested against the live API on 2026-11-18: GitHub accepted it,
+and the checker then reported the file as allowed. If the policy leaves out one of the file's other
+triggers (say `issue_comment`), the checker warns that the workflow won't run on it.
+
+How several event policies combine is inferred from GitHub's docs: every active event policy that
+targets the file must allow `pull_request_target`, and if none target it, the default block applies.
 GitHub's **Settings → Actions → Policy insights** page is the final word.
 
 ## License

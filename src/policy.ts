@@ -10,11 +10,12 @@ export interface ApiPolicy {
   source?: string;
   conditions?: { workflow_path?: { include?: string[]; exclude?: string[] } } & Record<string, unknown>;
   rules?: { type?: string; parameters?: { allowed_events?: string[] } & Record<string, unknown> }[];
+  _links?: { self?: { href?: string } };
 }
 
 export type PolicyStatus =
-  | { kind: "allowed"; policies: string[] }
-  | { kind: "blocked-by-policy"; policies: string[] }
+  | { kind: "allowed"; policies: string[]; otherBlocked?: string[] }
+  | { kind: "blocked-by-policy"; policies: string[]; otherBlocked?: string[] }
   | { kind: "blocked-by-default" }
   | { kind: "not-affected"; reason: string }
   | { kind: "unknown"; reason: string; isPublic?: boolean };
@@ -68,16 +69,19 @@ const policyName = (p: ApiPolicy) => `${p.name ?? `#${p.id ?? "?"}`}${p.source_t
  * Event policies layer like rulesets: every active one that targets the file must allow the
  * event. With none at all, GitHub's default policy blocks pull_request_target in public repos.
  */
-export function evaluatePolicies(policies: ApiPolicy[], file: string): PolicyStatus {
+export function evaluatePolicies(policies: ApiPolicy[], file: string, triggers: string[] = []): PolicyStatus {
   const applicable = policies.filter(
     (p) => p.enforcement === "active" && (p.rules ?? []).some((r) => r.type === EVENT_RULE) && targetsFile(p, file),
   );
   if (applicable.length === 0) return { kind: "blocked-by-default" };
-  const allows = (p: ApiPolicy) =>
-    (p.rules ?? []).filter((r) => r.type === EVENT_RULE).every((r) => (r.parameters?.allowed_events ?? []).includes("pull_request_target"));
-  const blocking = applicable.filter((p) => !allows(p));
-  if (blocking.length > 0) return { kind: "blocked-by-policy", policies: blocking.map(policyName) };
-  return { kind: "allowed", policies: applicable.map(policyName) };
+  const allows = (p: ApiPolicy, event: string) =>
+    (p.rules ?? []).filter((r) => r.type === EVENT_RULE).every((r) => (r.parameters?.allowed_events ?? []).includes(event));
+  // A policy limits the workflow to the events it lists, so other triggers can be blocked too.
+  const otherBlocked = triggers.filter((t) => t !== "pull_request_target" && applicable.some((p) => !allows(p, t)));
+  const extra = otherBlocked.length > 0 ? { otherBlocked } : {};
+  const blocking = applicable.filter((p) => !allows(p, "pull_request_target"));
+  if (blocking.length > 0) return { kind: "blocked-by-policy", policies: blocking.map(policyName), ...extra };
+  return { kind: "allowed", policies: applicable.map(policyName), ...extra };
 }
 
 /**

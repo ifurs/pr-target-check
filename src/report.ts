@@ -9,16 +9,28 @@ export function stopsRunning(p: PolicyStatus): boolean {
   return p.kind === "blocked-by-default" || p.kind === "blocked-by-policy" || p.kind === "unknown";
 }
 
+const otherBlocked = (p: PolicyStatus): string[] =>
+  (p.kind === "allowed" || p.kind === "blocked-by-policy") && p.otherBlocked ? p.otherBlocked : [];
+
 export function needsAction(f: FileResult): boolean {
-  return f.policy.kind !== "not-affected" && (stopsRunning(f.policy) || f.analysis.risk === "unsafe");
+  return (
+    f.policy.kind !== "not-affected" && (stopsRunning(f.policy) || f.analysis.risk === "unsafe" || otherBlocked(f.policy).length > 0)
+  );
+}
+
+function otherBlockedText(p: PolicyStatus): string {
+  const ev = otherBlocked(p);
+  if (ev.length === 0) return "";
+  const names = ev.map((e) => `\`${e}\``).join(", ");
+  return ` But its ${ev.length === 1 ? "trigger" : "triggers"} ${names} ${ev.length === 1 ? "isn't" : "aren't"} in the policy's allowed_events, so the workflow won't run on ${ev.length === 1 ? "it" : "them"}. Add ${ev.length === 1 ? "it" : "them"} to the policy.`;
 }
 
 export function statusLine(p: PolicyStatus): string {
   switch (p.kind) {
     case "allowed":
-      return `Keeps running: allowed by ${list(p.policies)}.`;
+      return `Keeps running: allowed by ${list(p.policies)}.${otherBlockedText(p)}`;
     case "blocked-by-policy":
-      return `Blocked now: ${list(p.policies)} doesn't allow pull_request_target.`;
+      return `Blocked now: ${list(p.policies)} doesn't allow pull_request_target.${otherBlockedText(p)}`;
     case "blocked-by-default":
       return "Stops running on December 2: no Actions event policy allows pull_request_target for this file.";
     case "not-affected":
@@ -115,7 +127,7 @@ export function renderText(results: RepoResult[], s: Style = plain, verbose = fa
       if (shown.length > limit) out.push(s.dim(`        … and ${shown.length - limit} more like these (--verbose shows all)`));
       const info = a.findings.filter((x) => x.severity === "info");
       if (info.length && !verbose) out.push(s.dim(`        ${info.map((x) => x.message).join(" ")}`));
-      if (f.policy.kind !== "not-affected" && (needsAction(f) || a.risk !== "safe")) {
+      if (showFix(f)) {
         out.push(`      ${s.bold("Fix:")}`);
         for (const l of fixLines(f, r.slug)) out.push(`        ${l}`);
       }
@@ -158,7 +170,7 @@ export function renderMarkdown(results: RepoResult[]): string {
       out.push(`- ${RISK_TEXT[a.risk]}`);
       if (a.error) out.push(`- ${a.error}`);
       for (const fd of a.findings) out.push(`  - ${fd.line ? `line ${fd.line}: ` : ""}${fd.message}`);
-      if (f.policy.kind !== "not-affected" && (needsAction(f) || a.risk !== "safe")) {
+      if (showFix(f)) {
         out.push("", "**Fix**", "");
         for (const l of fixLines(f, r.slug)) {
           out.push(l.startsWith("  ") ? "```sh\n" + l.trim() + "\n```" : `- ${l}`);
@@ -188,4 +200,12 @@ export function renderJson(results: RepoResult[]): string {
     null,
     2,
   );
+}
+
+/** Fix advice is noise for files that are fine, or already allowed and safe. */
+function showFix(f: FileResult): boolean {
+  const a = f.analysis;
+  if (f.policy.kind === "not-affected") return false;
+  if (f.policy.kind === "allowed" && a.risk === "safe") return false;
+  return needsAction(f) || a.risk !== "safe";
 }

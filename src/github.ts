@@ -106,7 +106,21 @@ export class GitHub {
       all.push(...batch);
       if (batch.length < 100) break;
     }
-    return { policies: all };
+    // The list endpoint returns summaries without `conditions` or `rules`, so fetch the details
+    // of every active policy. Inherited ones live under the org or enterprise; their
+    // `_links.self.href` points there. Only follow links on this API host (the token goes along).
+    const active = all.filter((p) => p.enforcement === "active" && p.rules === undefined);
+    const failures: string[] = [];
+    const details = await mapLimit(active, 4, async (p) => {
+      const href = p._links?.self?.href;
+      const path = href?.startsWith(`${this.base}/`) ? href.slice(this.base.length + 1) : `repos/${fullName}/actions/policies/${p.id}`;
+      const d = await this.get<ApiPolicy>(path);
+      if (!d.data) failures.push(`couldn't read policy "${p.name ?? p.id}" (HTTP ${d.status})`);
+      return d.data ?? p;
+    });
+    if (failures.length > 0) return { reason: failures.join("; ") };
+    const byId = new Map(details.map((d) => [d.id, d]));
+    return { policies: all.map((p) => byId.get(p.id) ?? p) };
   }
 
   /** Public, non-archived repositories of an organization or user. */

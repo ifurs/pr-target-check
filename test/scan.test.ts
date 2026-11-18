@@ -107,6 +107,49 @@ describe("scanRemote", () => {
     await expect(new GitHub(undefined, f).repo("o/r")).rejects.toThrow(/without a token/);
     await expect(new GitHub("t", f).repo("o/r")).rejects.toThrow(/rate limit reached\. Try/);
   });
+
+  // Shape seen live on 2026-11-18: the list endpoint returns summaries without conditions or
+  // rules; details come from each policy's own URL.
+  it("fetches policy details because the list only has summaries", async () => {
+    const summary = (id: number, name: string, href: string, enforcement = "active") => ({
+      id,
+      name,
+      enforcement,
+      source_type: href.includes("/orgs/") ? "Organization" : "Repository",
+      _links: { self: { href } },
+    });
+    const allowRule = { type: "restrict_action_events", parameters: { allowed_events: ["pull_request_target", "workflow_dispatch"] } };
+    const routes = sandboxRoutes([
+      summary(1, "Allow labeler", "https://api.github.com/repos/o/r/actions/policies/1"),
+      summary(2, "Org events", "https://api.github.com/orgs/o/actions/policies/2"),
+      summary(3, "Off", "https://api.github.com/repos/o/r/actions/policies/3", "disabled"),
+    ]);
+    routes["repos/o/r/actions/policies/1"] = [
+      200,
+      { ...summary(1, "Allow labeler", ""), conditions: { workflow_path: { include: [".github/workflows/labeler.yml"], exclude: [] } }, rules: [allowRule] },
+    ];
+    routes["orgs/o/actions/policies/2"] = [200, { ...summary(2, "Org events", "/orgs/"), rules: [allowRule] }];
+    const seen: string[] = [];
+    const r = await scanRemote(new GitHub("t", fakeFetch(routes, seen)), "o/r");
+    expect(r.files.map((f) => f.policy)).toEqual([
+      { kind: "allowed", policies: ["Allow labeler", "Org events (organization)"] },
+      { kind: "allowed", policies: ["Org events (organization)"] },
+    ]);
+    expect(seen.some((s) => s.endsWith("policies/3"))).toBe(false);
+
+    // A detail we can't read makes the result unknown rather than guessing.
+    delete routes["orgs/o/actions/policies/2"];
+    const r2 = await scanRemote(new GitHub("t", fakeFetch(routes)), "o/r");
+    expect(r2.files[0]!.policy).toMatchObject({ kind: "unknown", reason: 'couldn\'t read policy "Org events" (HTTP 404)' });
+
+    // Links to another host are not followed (the token would go along).
+    const foreign = sandboxRoutes([summary(1, "Allow labeler", "https://evil.example/steal")]);
+    foreign["repos/o/r/actions/policies/1"] = routes["repos/o/r/actions/policies/1"]!;
+    const seen2: string[] = [];
+    await scanRemote(new GitHub("t", fakeFetch(foreign, seen2)), "o/r");
+    expect(seen2.some((s) => s.includes("evil"))).toBe(false);
+    expect(seen2).toContain("auth repos/o/r/actions/policies/1");
+  });
 });
 
 describe("scanOwner", () => {
@@ -228,6 +271,23 @@ ${steps}
       expect(renderText([r])).toContain("… and 3 more like these (--verbose shows all)");
       expect(renderText([r], undefined, true)).not.toContain("more like these");
     });
+  });
+
+  it("warns when an allow policy blocks the file's other triggers", async () => {
+    const routes = sandboxRoutes([
+      {
+        name: "Allow",
+        enforcement: "active",
+        conditions: { workflow_path: { include: [".github/workflows/labeler.yml"] } },
+        rules: [{ type: "restrict_action_events", parameters: { allowed_events: ["pull_request_target"] } }],
+      },
+    ]);
+    const r = await scanRemote(new GitHub("t", fakeFetch(routes)), "o/r");
+    const text = renderText([r]);
+    expect(text).toContain(
+      'Keeps running: allowed by "Allow". But its trigger `workflow_dispatch` isn\'t in the policy\'s allowed_events, so the workflow won\'t run on it. Add it to the policy.',
+    );
+    expect(text).toContain("✗ .github/workflows/labeler.yml");
   });
 
   it("findToken prefers env vars", () => {

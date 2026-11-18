@@ -26,9 +26,9 @@ export interface RepoResult {
 
 type Ctx = { visibility?: string; policies?: ApiPolicy[]; reason?: string };
 
-function statusFor(ctx: Ctx, file: string): PolicyStatus {
+function statusFor(ctx: Ctx, file: string, triggers: string[]): PolicyStatus {
   if (ctx.visibility && ctx.visibility !== "public") return { kind: "not-affected", reason: `${ctx.visibility} repository` };
-  if (ctx.policies) return evaluatePolicies(ctx.policies, file);
+  if (ctx.policies) return evaluatePolicies(ctx.policies, file, triggers);
   return { kind: "unknown", reason: ctx.reason ?? "policies weren't checked", isPublic: ctx.visibility === "public" || undefined };
 }
 
@@ -36,7 +36,7 @@ function analyzeAll(sources: { path: string; source: string }[], ctx: Ctx): File
   return sources
     .map((s) => analyzeWorkflow(s.path, s.source))
     .filter((a) => a.usesPrTarget)
-    .map((analysis) => ({ analysis, policy: statusFor(ctx, analysis.path) }));
+    .map((analysis) => ({ analysis, policy: statusFor(ctx, analysis.path, analysis.triggers) }));
 }
 
 export function readLocalWorkflows(dir: string): { path: string; source: string }[] {
