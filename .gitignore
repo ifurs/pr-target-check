@@ -1,3 +1,3 @@
 node_modules/
 coverage/
-dist/
+# dist/cli.mjs is committed on purpose: `npx github:ifurs/pr-target-check` runs it directly.

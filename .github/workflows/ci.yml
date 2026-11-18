@@ -27,8 +27,14 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run coverage
-      - name: Build and smoke-test the bundle
+      - name: dist/ must match the source
         run: |
           npm run build
+          if ! git diff --exit-code -- dist/; then
+            echo "::error::dist/ is out of date. Run 'npm run build' and commit the result."
+            exit 1
+          fi
+      - name: Smoke-test the bundle
+        run: |
           node dist/cli.mjs --version
           node dist/cli.mjs --offline .

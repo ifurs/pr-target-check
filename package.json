@@ -14,7 +14,7 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=22.20"
+    "node": ">=22"
   },
   "keywords": [
     "github-actions",
@@ -29,7 +29,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "coverage": "vitest run --coverage",
-    "prepack": "npm run build"
+    "prepublishOnly": "npm run build"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

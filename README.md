@@ -14,15 +14,15 @@ Labelers, welcome bots, CLA checks and preview builds that use it will quietly s
    it and allow just that file. For safe files, it prints the exact `gh api` command for the policy.
 
 ```sh
-npx pr-target-check                  # the repo in the current directory
-npx pr-target-check owner/repo       # any repo on GitHub
-npx pr-target-check --owner my-org   # every public repo of an org or user
+npx github:ifurs/pr-target-check                  # the repo in the current directory
+npx github:ifurs/pr-target-check owner/repo       # any repo on GitHub
+npx github:ifurs/pr-target-check --owner my-org   # every public repo of an org or user
 ```
 
 ## Example
 
 ```text
-$ npx pr-target-check nodejs/node
+$ npx github:ifurs/pr-target-check nodejs/node
 nodejs/node  (public)
   ✗ .github/workflows/commit-lint.yml
       Stops running on December 2, unless an event policy allows it (couldn't check: reading
@@ -70,6 +70,8 @@ Then it picks a fix:
   The command lists every event the file uses, because the policy limits the workflow to those events.
 
 It never suggests allowing a file that looks unsafe.
+
+Needs Node.js 22 or newer. It runs straight from this repository; there's no npm package yet.
 
 ## Policies and tokens
 

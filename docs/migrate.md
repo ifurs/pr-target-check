@@ -82,5 +82,5 @@ Don't allow the trigger for all workflows (`~ALL`). A new workflow added later w
 
 ## Checking your work
 
-- Run `npx pr-target-check` again. Allowed files show *Keeps running*.
+- Run `npx github:ifurs/pr-target-check` again. Allowed files show *Keeps running*.
 - **Settings → Actions → Policy insights** shows runs that were blocked or would have been.
