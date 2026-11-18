@@ -1,0 +1,13 @@
+on: [pull_request_target]
+permissions:
+  pull-requests: write
+jobs:
+  greet:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Greet
+        run: echo "Thanks for ${{ github.event.pull_request.title }}"
+      - name: Safe greet
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: echo "Thanks for $TITLE"

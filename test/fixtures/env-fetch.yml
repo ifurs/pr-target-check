@@ -1,0 +1,14 @@
+on: pull_request_target
+permissions: write-all
+env:
+  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Get PR
+        run: |
+          git fetch origin $HEAD_SHA
+          git checkout $HEAD_SHA
+      - uses: ./.github/actions/build

@@ -1,0 +1,49 @@
+# Part 2 of 2. Copy to .github/workflows/pr-label.yml
+#
+# Runs from the default branch with write access after "PR info" finishes. It never checks
+# out or runs pull request code. The artifact comes from the pull request, so it is treated
+# as untrusted data: the number is validated and checked against the API before use.
+name: PR label
+
+on:
+  workflow_run:
+    workflows: ["PR info"]   # must match part 1's name
+    types: [completed]
+
+permissions:
+  actions: read          # download the artifact from part 1
+  contents: read         # read .github/labeler.yml from the default branch
+  pull-requests: write   # add labels
+
+jobs:
+  label:
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: pr
+          path: pr
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Check the PR number
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          n="$(head -c 20 pr/number | tr -d '[:space:]')"
+          if ! [[ "$n" =~ ^[0-9]+$ ]]; then echo "::error::Not a PR number"; exit 1; fi
+          # A pull request can write any number into its artifact. Make sure that PR
+          # really is the one whose run triggered this workflow.
+          sha="$(gh api "repos/$REPO/pulls/$n" --jq .head.sha)"
+          if [ "$sha" != "$HEAD_SHA" ]; then echo "::error::PR #$n doesn't match this run"; exit 1; fi
+          echo "number=$n" >> "$GITHUB_OUTPUT"
+
+      # Your privileged step goes here. It may use secrets and write access, but must not
+      # run anything from the pull request.
+      - uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13  # v7.0.0
+        with:
+          pr-number: ${{ steps.pr.outputs.number }}

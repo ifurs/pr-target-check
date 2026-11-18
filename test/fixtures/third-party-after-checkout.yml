@@ -1,0 +1,13 @@
+on: pull_request_target
+permissions:
+  pull-requests: write
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.head_ref }}
+          allow-unsafe-pr-checkout: true
+      - uses: some/linter-action@v2

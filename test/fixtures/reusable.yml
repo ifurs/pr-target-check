@@ -1,0 +1,5 @@
+on: pull_request_target
+jobs:
+  call:
+    uses: org/shared/.github/workflows/ci.yml@main
+    secrets: inherit

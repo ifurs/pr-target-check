@@ -1,0 +1,13 @@
+name: Test fork PRs
+on: pull_request_target
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Install
+        run: npm ci
+      - name: Upload coverage
+        run: npx codecov --token "${{ secrets.CODECOV_TOKEN }}"

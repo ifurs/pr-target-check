@@ -1,0 +1,27 @@
+# Part 1 of 2. Copy to .github/workflows/pr-info.yml
+#
+# Runs for every pull request, including from forks, with no secrets and no token access.
+# It only records which pull request this is, for part 2.
+name: PR info
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions: {}
+
+jobs:
+  save:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Save the PR number
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          mkdir -p pr
+          echo "$PR_NUMBER" > pr/number
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: pr
+          path: pr/
+          retention-days: 1

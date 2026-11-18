@@ -1,0 +1,191 @@
+// Formats results as text (terminal), Markdown (issues, job summaries) or JSON.
+import { allowPolicyBody, allowPolicyCommand, type PolicyStatus } from "./policy";
+import { allowable } from "./workflow";
+import type { FileResult, RepoResult } from "./scan";
+
+export const GUIDE_URL = "https://github.com/ifurs/pr-target-check/blob/main/docs/migrate.md";
+
+export function stopsRunning(p: PolicyStatus): boolean {
+  return p.kind === "blocked-by-default" || p.kind === "blocked-by-policy" || p.kind === "unknown";
+}
+
+export function needsAction(f: FileResult): boolean {
+  return f.policy.kind !== "not-affected" && (stopsRunning(f.policy) || f.analysis.risk === "unsafe");
+}
+
+export function statusLine(p: PolicyStatus): string {
+  switch (p.kind) {
+    case "allowed":
+      return `Keeps running: allowed by ${list(p.policies)}.`;
+    case "blocked-by-policy":
+      return `Blocked now: ${list(p.policies)} doesn't allow pull_request_target.`;
+    case "blocked-by-default":
+      return "Stops running on December 2: no Actions event policy allows pull_request_target for this file.";
+    case "not-affected":
+      return `Not affected (${p.reason}).`;
+    case "unknown":
+      return `Stops running on December 2${p.isPublic ? "" : " if the repository is public"}, unless an event policy allows it (couldn't check: ${p.reason}).`;
+  }
+}
+
+const RISK_TEXT = {
+  unsafe: "Likely unsafe: it looks like it can run code from a pull request with this repository's token or secrets.",
+  review: "Check it: it touches pull request code or calls code this tool can't see.",
+  safe: "Looks safe: it doesn't check out or run pull request code.",
+} as const;
+
+export function fixLines(f: FileResult, slug: string | undefined): string[] {
+  const a = f.analysis;
+  const out: string[] = [];
+  const hasDefaultPerms = a.findings.some((x) => x.code === "default-permissions");
+  if (a.risk === "unsafe") out.push("Don't allow this file as it is.");
+  if (a.fix === "switch" || a.fix === "switch-or-allow") {
+    out.push(
+      "Change `pull_request_target` to `pull_request`. It uses no secrets and asks for no write access, so fork PRs can run it with a read-only token. One difference: depending on your fork-PR approval setting, runs for outside contributors may wait for a maintainer to approve them.",
+    );
+  } else {
+    out.push(
+      `Split it into two workflows: \`pull_request\` does the untrusted part with no secrets, then a \`workflow_run\` workflow does the privileged part (comments, labels, secrets) without running PR code. Guide: ${GUIDE_URL}`,
+    );
+    if (hasDefaultPerms) {
+      out.push("If it only needs read access, add `permissions: contents: read` and switch to `pull_request` instead.");
+    }
+  }
+  if (allowable(a.fix) && f.policy.kind !== "allowed") {
+    out.push("Or keep it as it is and allow only this file:");
+    out.push(`  ${allowPolicyCommand(slug ?? "OWNER/REPO", a.path, a.triggers)}`);
+  }
+  if (a.risk === "unsafe" && f.policy.kind === "allowed") {
+    out.push("A policy allows this file, so it keeps running, and it stays exploitable. Fix it or remove it from that policy.");
+  }
+  return out;
+}
+
+const MAX_FINDINGS = 4;
+
+const list = (xs: string[]) => xs.map((x) => `"${x}"`).join(", ");
+
+// ---------- text ----------
+
+export interface Style {
+  bold(s: string): string;
+  red(s: string): string;
+  yellow(s: string): string;
+  green(s: string): string;
+  dim(s: string): string;
+}
+
+export const plain: Style = { bold: (s) => s, red: (s) => s, yellow: (s) => s, green: (s) => s, dim: (s) => s };
+export const ansi: Style = {
+  bold: (s) => `\x1b[1m${s}\x1b[22m`,
+  red: (s) => `\x1b[31m${s}\x1b[39m`,
+  yellow: (s) => `\x1b[33m${s}\x1b[39m`,
+  green: (s) => `\x1b[32m${s}\x1b[39m`,
+  dim: (s) => `\x1b[2m${s}\x1b[22m`,
+};
+
+export function renderText(results: RepoResult[], s: Style = plain, verbose = false): string {
+  const out: string[] = [];
+  for (const r of results) {
+    if (r.error) {
+      out.push(`${s.bold(r.name)}  ${s.red(`error: ${r.error}`)}`, "");
+      continue;
+    }
+    if (r.files.length === 0) {
+      if (verbose || results.length === 1) out.push(`${s.bold(r.name)}  ${s.green("✓")} no pull_request_target workflows (${r.scanned} scanned)`, "");
+      continue;
+    }
+    out.push(`${s.bold(r.name)}${r.visibility ? s.dim(`  (${r.visibility})`) : ""}`);
+    if (r.note) out.push(s.dim(`  ${r.note}`));
+    for (const f of r.files) {
+      const a = f.analysis;
+      const mark = needsAction(f) ? s.red("✗") : f.policy.kind === "not-affected" ? s.dim("–") : s.green("✓");
+      out.push(`  ${mark} ${s.bold(a.path)}`);
+      const st = statusLine(f.policy);
+      out.push(`      ${stopsRunning(f.policy) ? s.yellow(st) : st}`);
+      if (a.error) out.push(`      ${s.yellow(a.error)}`);
+      const riskText = RISK_TEXT[a.risk];
+      out.push(`      ${a.risk === "unsafe" ? s.red(riskText) : a.risk === "review" ? s.yellow(riskText) : riskText}`);
+      const shown = a.findings.filter((x) => x.severity !== "info" || verbose);
+      const limit = verbose ? Infinity : MAX_FINDINGS;
+      for (const fd of shown.slice(0, limit)) {
+        const where = fd.line ? s.dim(`line ${fd.line}: `) : "";
+        out.push(`        - ${where}${fd.message}`);
+      }
+      if (shown.length > limit) out.push(s.dim(`        … and ${shown.length - limit} more like these (--verbose shows all)`));
+      const info = a.findings.filter((x) => x.severity === "info");
+      if (info.length && !verbose) out.push(s.dim(`        ${info.map((x) => x.message).join(" ")}`));
+      if (f.policy.kind !== "not-affected" && (needsAction(f) || a.risk !== "safe")) {
+        out.push(`      ${s.bold("Fix:")}`);
+        for (const l of fixLines(f, r.slug)) out.push(`        ${l}`);
+      }
+    }
+    out.push("");
+  }
+  out.push(summary(results, s));
+  return out.join("\n");
+}
+
+export function summary(results: RepoResult[], s: Style = plain): string {
+  const files = results.flatMap((r) => r.files);
+  const stop = files.filter((f) => stopsRunning(f.policy)).length;
+  const unsafe = files.filter((f) => f.analysis.risk === "unsafe" && f.policy.kind !== "not-affected").length;
+  const errors = results.filter((r) => r.error).length;
+  const repos = results.length === 1 ? "1 repository" : `${results.length} repositories`;
+  if (files.length === 0 && errors === 0) return s.green(`✓ No pull_request_target workflows in ${repos}. Nothing to do.`);
+  const parts = [`${files.length} pull_request_target workflow${files.length === 1 ? "" : "s"} in ${repos}`];
+  parts.push(stop ? s.yellow(`${stop} stop${stop === 1 ? "s" : ""} running on December 2`) : s.green("none stop running"));
+  if (unsafe) parts.push(s.red(`${unsafe} unsafe`));
+  if (errors) parts.push(s.red(`${errors} couldn't be scanned`));
+  return parts.join(", ") + ".";
+}
+
+// ---------- markdown ----------
+
+export function renderMarkdown(results: RepoResult[]): string {
+  const out: string[] = ["## pull_request_target check", "", summary(results), ""];
+  for (const r of results) {
+    if (r.error) {
+      out.push(`### ${r.name}`, "", `Couldn't scan: ${r.error}`, "");
+      continue;
+    }
+    if (r.files.length === 0) continue;
+    out.push(`### ${r.name}${r.visibility ? ` (${r.visibility})` : ""}`, "");
+    for (const f of r.files) {
+      const a = f.analysis;
+      out.push(`#### ${needsAction(f) ? "❌" : "✅"} \`${a.path}\``, "");
+      out.push(`- ${statusLine(f.policy)}`);
+      out.push(`- ${RISK_TEXT[a.risk]}`);
+      if (a.error) out.push(`- ${a.error}`);
+      for (const fd of a.findings) out.push(`  - ${fd.line ? `line ${fd.line}: ` : ""}${fd.message}`);
+      if (f.policy.kind !== "not-affected" && (needsAction(f) || a.risk !== "safe")) {
+        out.push("", "**Fix**", "");
+        for (const l of fixLines(f, r.slug)) {
+          out.push(l.startsWith("  ") ? "```sh\n" + l.trim() + "\n```" : `- ${l}`);
+        }
+      }
+      out.push("");
+    }
+  }
+  return out.join("\n");
+}
+
+// ---------- json ----------
+
+export function renderJson(results: RepoResult[]): string {
+  return JSON.stringify(
+    {
+      results: results.map((r) => ({
+        ...r,
+        files: r.files.map((f) => ({
+          ...f,
+          stopsRunning: stopsRunning(f.policy),
+          needsAction: needsAction(f),
+          allowPolicy: allowable(f.analysis.fix) ? allowPolicyBody(f.analysis.path, f.analysis.triggers) : undefined,
+        })),
+      })),
+    },
+    null,
+    2,
+  );
+}

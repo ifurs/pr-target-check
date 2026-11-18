@@ -1,0 +1,47 @@
+{
+  "name": "pr-target-check",
+  "version": "0.1.0",
+  "description": "Find GitHub Actions workflows that break when pull_request_target is blocked on December 2, 2026, and get a safe fix for each one.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "pr-target-check": "dist/cli.mjs"
+  },
+  "files": [
+    "dist/cli.mjs",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.20"
+  },
+  "keywords": [
+    "github-actions",
+    "pull_request_target",
+    "security",
+    "workflow",
+    "migration",
+    "ci"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@vitest/coverage-v8": "^5.1.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0",
+    "yaml": "^2.9.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ifurs/pr-target-check.git"
+  },
+  "homepage": "https://github.com/ifurs/pr-target-check#readme"
+}
