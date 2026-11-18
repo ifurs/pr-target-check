@@ -1,0 +1,17 @@
+version: 2
+updates:
+  # Note: an npm update can change the bundle, so run `npm run build` on the PR and commit
+  # dist/ before merging; CI fails until dist/ matches.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      dev-dependencies:
+        dependency-type: development
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

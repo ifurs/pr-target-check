@@ -1,6 +1,7 @@
 // Minimal read-only GitHub REST client. The tool never writes to GitHub.
 import { execFileSync } from "node:child_process";
 import { API_VERSION, type ApiPolicy } from "./policy";
+import { clean } from "./sanitize";
 
 export interface RepoInfo {
   full_name: string;
@@ -115,7 +116,7 @@ export class GitHub {
       const href = p._links?.self?.href;
       const path = href?.startsWith(`${this.base}/`) ? href.slice(this.base.length + 1) : `repos/${fullName}/actions/policies/${p.id}`;
       const d = await this.get<ApiPolicy>(path);
-      if (!d.data) failures.push(`couldn't read policy "${p.name ?? p.id}" (HTTP ${d.status})`);
+      if (!d.data) failures.push(`couldn't read policy "${clean(String(p.name ?? p.id), 80)}" (HTTP ${d.status})`);
       return d.data ?? p;
     });
     if (failures.length > 0) return { reason: failures.join("; ") };

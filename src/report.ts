@@ -1,6 +1,7 @@
 // Formats results as text (terminal), Markdown (issues, job summaries) or JSON.
 import { allowPolicyBody, allowPolicyCommand, type PolicyStatus } from "./policy";
 import { allowable } from "./workflow";
+import { clean, mdCode, mdText } from "./sanitize";
 import type { FileResult, RepoResult } from "./scan";
 
 export const GUIDE_URL = "https://github.com/ifurs/pr-target-check/blob/main/docs/migrate.md";
@@ -100,19 +101,19 @@ export function renderText(results: RepoResult[], s: Style = plain, verbose = fa
   const out: string[] = [];
   for (const r of results) {
     if (r.error) {
-      out.push(`${s.bold(r.name)}  ${s.red(`error: ${r.error}`)}`, "");
+      out.push(`${s.bold(clean(r.name))}  ${s.red(`error: ${clean(r.error)}`)}`, "");
       continue;
     }
     if (r.files.length === 0) {
-      if (verbose || results.length === 1) out.push(`${s.bold(r.name)}  ${s.green("✓")} no pull_request_target workflows (${r.scanned} scanned)`, "");
+      if (verbose || results.length === 1) out.push(`${s.bold(clean(r.name))}  ${s.green("✓")} no pull_request_target workflows (${r.scanned} scanned)`, "");
       continue;
     }
-    out.push(`${s.bold(r.name)}${r.visibility ? s.dim(`  (${r.visibility})`) : ""}`);
-    if (r.note) out.push(s.dim(`  ${r.note}`));
+    out.push(`${s.bold(clean(r.name))}${r.visibility ? s.dim(`  (${clean(r.visibility)})`) : ""}`);
+    if (r.note) out.push(s.dim(`  ${clean(r.note)}`));
     for (const f of r.files) {
       const a = f.analysis;
       const mark = needsAction(f) ? s.red("✗") : f.policy.kind === "not-affected" ? s.dim("–") : s.green("✓");
-      out.push(`  ${mark} ${s.bold(a.path)}`);
+      out.push(`  ${mark} ${s.bold(clean(a.path))}`);
       const st = statusLine(f.policy);
       out.push(`      ${stopsRunning(f.policy) ? s.yellow(st) : st}`);
       if (a.error) out.push(`      ${s.yellow(a.error)}`);
@@ -158,22 +159,24 @@ export function renderMarkdown(results: RepoResult[]): string {
   const out: string[] = ["## pull_request_target check", "", summary(results), ""];
   for (const r of results) {
     if (r.error) {
-      out.push(`### ${r.name}`, "", `Couldn't scan: ${r.error}`, "");
+      out.push(`### ${mdText(r.name)}`, "", `Couldn't scan: ${mdText(r.error)}`, "");
       continue;
     }
     if (r.files.length === 0) continue;
-    out.push(`### ${r.name}${r.visibility ? ` (${r.visibility})` : ""}`, "");
+    out.push(`### ${mdText(r.name)}${r.visibility ? ` (${mdText(r.visibility)})` : ""}`, "");
     for (const f of r.files) {
       const a = f.analysis;
-      out.push(`#### ${needsAction(f) ? "❌" : "✅"} \`${a.path}\``, "");
+      out.push(`#### ${needsAction(f) ? "❌" : "✅"} ${mdCode(a.path)}`, "");
       out.push(`- ${statusLine(f.policy)}`);
       out.push(`- ${RISK_TEXT[a.risk]}`);
-      if (a.error) out.push(`- ${a.error}`);
-      for (const fd of a.findings) out.push(`  - ${fd.line ? `line ${fd.line}: ` : ""}${fd.message}`);
+      if (a.error) out.push(`- ${mdText(a.error)}`);
+      for (const fd of a.findings) out.push(`  - ${fd.line ? `line ${fd.line}: ` : ""}${mdText(fd.message)}`);
       if (showFix(f)) {
         out.push("", "**Fix**", "");
         for (const l of fixLines(f, r.slug)) {
-          out.push(l.startsWith("  ") ? "```sh\n" + l.trim() + "\n```" : `- ${l}`);
+          // The command holds a file name from the scanned repo: pick a fence it can't close.
+          const fence = "`".repeat(Math.max(3, ...[...l.matchAll(/`+/g)].map((m) => m[0].length + 1)));
+          out.push(l.startsWith("  ") ? `${fence}sh\n${clean(l.trim(), 2000)}\n${fence}` : `- ${l}`);
         }
       }
       out.push("");

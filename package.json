@@ -9,9 +9,11 @@
   },
   "files": [
     "dist/cli.mjs",
+    "dist/licenses.txt",
     "docs",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "SECURITY.md"
   ],
   "engines": {
     "node": ">=22"

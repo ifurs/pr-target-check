@@ -1,5 +1,6 @@
 // Static analysis of one workflow file. Pure: no network, no file system.
 import { LineCounter, parseDocument, type Document } from "yaml";
+import { clean } from "./sanitize";
 
 export type Severity = "high" | "medium" | "info";
 
@@ -146,7 +147,7 @@ export function analyzeWorkflow(path: string, source: string): WorkflowAnalysis 
         severity: "medium",
         job: jobId,
         line: lineAt(["jobs", jobId, "uses"]),
-        message: `Calls ${job.uses}. Its steps run with this trigger's access, but this tool doesn't check them.`,
+        message: `Calls ${clean(job.uses, 120)}. Its steps run with this trigger's access, but this tool doesn't check them.`,
       });
       continue;
     }
@@ -168,7 +169,7 @@ export function analyzeWorkflow(path: string, source: string): WorkflowAnalysis 
       const w = isObj(step.with) ? step.with : {};
       const tainted = taintedEnvNames(wf.env, job.env, step.env);
       const line = lineAt(["jobs", jobId, "steps", i]);
-      const label = str(step.name) || uses || "run step";
+      const label = clean(str(step.name) || uses || "run step", 80);
 
       if (/^actions\/checkout@/i.test(uses)) {
         const ref = str(w.ref);
@@ -181,7 +182,7 @@ export function analyzeWorkflow(path: string, source: string): WorkflowAnalysis 
             severity: "medium",
             job: jobId,
             line,
-            message: `"${label}" checks out the pull request's code (${ref || repo})${unsafeFlag ? ", with allow-unsafe-pr-checkout: true" : ""}.`,
+            message: `"${label}" checks out the pull request's code (${clean(ref || repo, 120)})${unsafeFlag ? ", with allow-unsafe-pr-checkout: true" : ""}.`,
           });
         } else if (unsafeFlag) {
           findings.push({
@@ -278,7 +279,7 @@ function parseFailure(path: string, source: string, error: string): WorkflowAnal
     risk: "review",
     fix: "split",
     findings: [],
-    error: `Couldn't parse this file: ${error}`,
+    error: `Couldn't parse this file: ${clean(error, 200)}`,
   };
 }
 

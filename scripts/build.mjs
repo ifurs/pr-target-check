@@ -1,9 +1,11 @@
 // Bundles the CLI into one file with no runtime dependencies.
 import { build } from "esbuild";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 
 const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-await build({
+const result = await build({
+  metafile: true,
   entryPoints: ["src/bin.ts"],
   bundle: true,
   platform: "node",
@@ -16,3 +18,7 @@ await build({
   },
   legalComments: "eof",
 });
+
+// dist/licenses.txt: license texts of the bundled packages, as their licenses require.
+writeFileSync("build-meta.json", JSON.stringify(result.metafile));
+execFileSync(process.execPath, ["scripts/licenses.mjs", "build-meta.json"], { stdio: "inherit" });

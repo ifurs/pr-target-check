@@ -1,6 +1,7 @@
 // Actions event policies: does one allow pull_request_target for a given workflow file?
 // API reference: https://docs.github.com/en/rest/actions/policies
 // Pure: no network.
+import { clean, shellQuote } from "./sanitize";
 
 export interface ApiPolicy {
   id?: number;
@@ -63,7 +64,7 @@ export function targetsFile(policy: ApiPolicy, file: string): boolean {
   return included && !exclude.some((g) => matchesPath(file, g));
 }
 
-const policyName = (p: ApiPolicy) => `${p.name ?? `#${p.id ?? "?"}`}${p.source_type && p.source_type !== "Repository" ? ` (${p.source_type.toLowerCase()})` : ""}`;
+const policyName = (p: ApiPolicy) => `${clean(p.name ?? `#${p.id ?? "?"}`, 80)}${p.source_type && p.source_type !== "Repository" ? ` (${p.source_type.toLowerCase()})` : ""}`;
 
 /**
  * Event policies layer like rulesets: every active one that targets the file must allow the
@@ -99,7 +100,11 @@ export function allowPolicyBody(file: string, triggers: string[]) {
   };
 }
 
+const SLUG = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
+
+/** A copy-paste command. The file name comes from the scanned repo, so it's shell-quoted. */
 export function allowPolicyCommand(repo: string, file: string, triggers: string[]): string {
   const body = JSON.stringify(allowPolicyBody(file, triggers));
-  return `echo '${body}' | gh api --method POST repos/${repo}/actions/policies -H "X-GitHub-Api-Version: ${API_VERSION}" --input -`;
+  const slug = SLUG.test(repo) ? repo : "OWNER/REPO";
+  return `echo ${shellQuote(body)} | gh api --method POST repos/${slug}/actions/policies -H "X-GitHub-Api-Version: ${API_VERSION}" --input -`;
 }

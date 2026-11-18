@@ -7374,6 +7374,35 @@ import { parseArgs } from "node:util";
 // src/github.ts
 import { execFileSync } from "node:child_process";
 
+// src/sanitize.ts
+var UNSAFE = [
+  [0, 8],
+  [11, 31],
+  [127, 159],
+  [8232, 8233],
+  [8234, 8238],
+  [8294, 8297]
+];
+var REPLACEMENT = String.fromCodePoint(65533);
+var ELLIPSIS = String.fromCodePoint(8230);
+function clean(s, max = 300) {
+  let out = "";
+  for (const ch of s) {
+    const c = ch.codePointAt(0);
+    out += UNSAFE.some(([a, b]) => c >= a && c <= b) ? REPLACEMENT : ch;
+  }
+  return out.length > max ? out.slice(0, max) + ELLIPSIS : out;
+}
+function shellQuote(s) {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+function mdText(s) {
+  return clean(s).replace(/[\\`*_{}[\]<>()#+!|~]/g, "\\$&").replace(/\n/g, " ");
+}
+function mdCode(s) {
+  return "`" + clean(s).replace(/`/g, "'").replace(/\n/g, " ") + "`";
+}
+
 // src/policy.ts
 var API_VERSION = "2026-03-10";
 var EVENT_RULE = "restrict_action_events";
@@ -7413,7 +7442,7 @@ function targetsFile(policy, file) {
   const included = include.length === 0 || include.some((g) => matchesPath(file, g));
   return included && !exclude.some((g) => matchesPath(file, g));
 }
-var policyName = (p) => `${p.name ?? `#${p.id ?? "?"}`}${p.source_type && p.source_type !== "Repository" ? ` (${p.source_type.toLowerCase()})` : ""}`;
+var policyName = (p) => `${clean(p.name ?? `#${p.id ?? "?"}`, 80)}${p.source_type && p.source_type !== "Repository" ? ` (${p.source_type.toLowerCase()})` : ""}`;
 function evaluatePolicies(policies, file, triggers = []) {
   const applicable = policies.filter(
     (p) => p.enforcement === "active" && (p.rules ?? []).some((r) => r.type === EVENT_RULE) && targetsFile(p, file)
@@ -7435,9 +7464,11 @@ function allowPolicyBody(file, triggers) {
     rules: [{ type: EVENT_RULE, parameters: { allowed_events: [...new Set(triggers)].sort() } }]
   };
 }
+var SLUG = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
 function allowPolicyCommand(repo, file, triggers) {
   const body = JSON.stringify(allowPolicyBody(file, triggers));
-  return `echo '${body}' | gh api --method POST repos/${repo}/actions/policies -H "X-GitHub-Api-Version: ${API_VERSION}" --input -`;
+  const slug = SLUG.test(repo) ? repo : "OWNER/REPO";
+  return `echo ${shellQuote(body)} | gh api --method POST repos/${slug}/actions/policies -H "X-GitHub-Api-Version: ${API_VERSION}" --input -`;
 }
 
 // src/github.ts
@@ -7525,7 +7556,7 @@ var GitHub = class {
       const href = p._links?.self?.href;
       const path = href?.startsWith(`${this.base}/`) ? href.slice(this.base.length + 1) : `repos/${fullName}/actions/policies/${p.id}`;
       const d = await this.get(path);
-      if (!d.data) failures.push(`couldn't read policy "${p.name ?? p.id}" (HTTP ${d.status})`);
+      if (!d.data) failures.push(`couldn't read policy "${clean(String(p.name ?? p.id), 80)}" (HTTP ${d.status})`);
       return d.data ?? p;
     });
     if (failures.length > 0) return { reason: failures.join("; ") };
@@ -7648,7 +7679,7 @@ function analyzeWorkflow(path, source) {
         severity: "medium",
         job: jobId,
         line: lineAt(["jobs", jobId, "uses"]),
-        message: `Calls ${job.uses}. Its steps run with this trigger's access, but this tool doesn't check them.`
+        message: `Calls ${clean(job.uses, 120)}. Its steps run with this trigger's access, but this tool doesn't check them.`
       });
       continue;
     }
@@ -7666,7 +7697,7 @@ function analyzeWorkflow(path, source) {
       const w = isObj(step.with) ? step.with : {};
       const tainted = taintedEnvNames(wf.env, job.env, step.env);
       const line = lineAt(["jobs", jobId, "steps", i]);
-      const label = str(step.name) || uses || "run step";
+      const label = clean(str(step.name) || uses || "run step", 80);
       if (/^actions\/checkout@/i.test(uses)) {
         const ref = str(w.ref);
         const repo = str(w.repository);
@@ -7678,7 +7709,7 @@ function analyzeWorkflow(path, source) {
             severity: "medium",
             job: jobId,
             line,
-            message: `"${label}" checks out the pull request's code (${ref || repo})${unsafeFlag ? ", with allow-unsafe-pr-checkout: true" : ""}.`
+            message: `"${label}" checks out the pull request's code (${clean(ref || repo, 120)})${unsafeFlag ? ", with allow-unsafe-pr-checkout: true" : ""}.`
           });
         } else if (unsafeFlag) {
           findings.push({
@@ -7762,7 +7793,7 @@ function parseFailure(path, source, error) {
     risk: "review",
     fix: "split",
     findings: [],
-    error: `Couldn't parse this file: ${error}`
+    error: `Couldn't parse this file: ${clean(error, 200)}`
   };
 }
 
@@ -7840,19 +7871,19 @@ function renderText(results, s = plain, verbose = false) {
   const out = [];
   for (const r of results) {
     if (r.error) {
-      out.push(`${s.bold(r.name)}  ${s.red(`error: ${r.error}`)}`, "");
+      out.push(`${s.bold(clean(r.name))}  ${s.red(`error: ${clean(r.error)}`)}`, "");
       continue;
     }
     if (r.files.length === 0) {
-      if (verbose || results.length === 1) out.push(`${s.bold(r.name)}  ${s.green("\u2713")} no pull_request_target workflows (${r.scanned} scanned)`, "");
+      if (verbose || results.length === 1) out.push(`${s.bold(clean(r.name))}  ${s.green("\u2713")} no pull_request_target workflows (${r.scanned} scanned)`, "");
       continue;
     }
-    out.push(`${s.bold(r.name)}${r.visibility ? s.dim(`  (${r.visibility})`) : ""}`);
-    if (r.note) out.push(s.dim(`  ${r.note}`));
+    out.push(`${s.bold(clean(r.name))}${r.visibility ? s.dim(`  (${clean(r.visibility)})`) : ""}`);
+    if (r.note) out.push(s.dim(`  ${clean(r.note)}`));
     for (const f of r.files) {
       const a = f.analysis;
       const mark = needsAction(f) ? s.red("\u2717") : f.policy.kind === "not-affected" ? s.dim("\u2013") : s.green("\u2713");
-      out.push(`  ${mark} ${s.bold(a.path)}`);
+      out.push(`  ${mark} ${s.bold(clean(a.path))}`);
       const st = statusLine(f.policy);
       out.push(`      ${stopsRunning(f.policy) ? s.yellow(st) : st}`);
       if (a.error) out.push(`      ${s.yellow(a.error)}`);
@@ -7894,22 +7925,25 @@ function renderMarkdown(results) {
   const out = ["## pull_request_target check", "", summary(results), ""];
   for (const r of results) {
     if (r.error) {
-      out.push(`### ${r.name}`, "", `Couldn't scan: ${r.error}`, "");
+      out.push(`### ${mdText(r.name)}`, "", `Couldn't scan: ${mdText(r.error)}`, "");
       continue;
     }
     if (r.files.length === 0) continue;
-    out.push(`### ${r.name}${r.visibility ? ` (${r.visibility})` : ""}`, "");
+    out.push(`### ${mdText(r.name)}${r.visibility ? ` (${mdText(r.visibility)})` : ""}`, "");
     for (const f of r.files) {
       const a = f.analysis;
-      out.push(`#### ${needsAction(f) ? "\u274C" : "\u2705"} \`${a.path}\``, "");
+      out.push(`#### ${needsAction(f) ? "\u274C" : "\u2705"} ${mdCode(a.path)}`, "");
       out.push(`- ${statusLine(f.policy)}`);
       out.push(`- ${RISK_TEXT[a.risk]}`);
-      if (a.error) out.push(`- ${a.error}`);
-      for (const fd of a.findings) out.push(`  - ${fd.line ? `line ${fd.line}: ` : ""}${fd.message}`);
+      if (a.error) out.push(`- ${mdText(a.error)}`);
+      for (const fd of a.findings) out.push(`  - ${fd.line ? `line ${fd.line}: ` : ""}${mdText(fd.message)}`);
       if (showFix(f)) {
         out.push("", "**Fix**", "");
         for (const l of fixLines(f, r.slug)) {
-          out.push(l.startsWith("  ") ? "```sh\n" + l.trim() + "\n```" : `- ${l}`);
+          const fence = "`".repeat(Math.max(3, ...[...l.matchAll(/`+/g)].map((m) => m[0].length + 1)));
+          out.push(l.startsWith("  ") ? `${fence}sh
+${clean(l.trim(), 2e3)}
+${fence}` : `- ${l}`);
         }
       }
       out.push("");
