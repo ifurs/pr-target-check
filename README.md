@@ -19,6 +19,9 @@ npx github:ifurs/pr-target-check owner/repo       # any repo on GitHub
 npx github:ifurs/pr-target-check --owner my-org   # every public repo of an org or user
 ```
 
+To run a fixed release instead of the latest `main`, add the tag:
+`npx github:ifurs/pr-target-check#v0.1.0`. Release tags can't be moved or deleted.
+
 ## Example
 
 ```text
